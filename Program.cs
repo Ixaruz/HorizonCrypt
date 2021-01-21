@@ -1,27 +1,43 @@
 ﻿using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using NHSE.Core;
 
-namespace HorizonCrypt.ConsoleApp
+namespace PogCrypt.ConsoleApp
 {
-    internal static class Program
+    public sealed partial class Program
     {
-        private const string Encrypt   = "-c";
-        private const string Decrypt   = "-d";
+        private static HorizonSave SAV;
+
+        private const string Encrypt = "-c";
+        private const string Decrypt = "-d";
         private const string BatchMode = "-b";
 
+
         private enum Mode
-        { 
+        {
             Encrypt, Decrypt
         }
 
-        private static void Main(string[] args)
+        static void Main(string[] args)
         {
             if (!TryExecute(args))
+            {
                 PrintUsage();
+                return;
+            }
             else
+            {
                 Console.WriteLine("Done!");
+                return;
+            }
+
             Console.Read();
         }
+
 
         private static bool TryExecute(string[] args)
         {
@@ -87,7 +103,7 @@ namespace HorizonCrypt.ConsoleApp
             }
 
             var outDir = Path.Combine(directory, filename + (mode == Mode.Decrypt ? " Decrypted" : " Encrypted"));
-            Console.WriteLine("OutDir=" + outDir);
+            Console.WriteLine("OutDir: " + outDir + "\n");
 
             // In batch mode the file will be the root directory.
             if (batchMode)
@@ -96,6 +112,8 @@ namespace HorizonCrypt.ConsoleApp
                 if (Directory.Exists(rootDir))
                 {
                     ProcessFolder(rootDir, outDir, mode);
+                    
+                    if(mode == Mode.Encrypt) fixhashes(outDir);
                     return true;
                 }
 
@@ -121,12 +139,36 @@ namespace HorizonCrypt.ConsoleApp
                 ProcessFolder(subDir, Path.Combine(outDir, Path.GetFileName(subDir)), mode);
         }
 
+        private static void fixhashes(in string directory)
+        {
+            //lazy hash fix
+            string[] files = Directory.GetFiles(directory, "*.dat");
+            if (files.Any())
+            {
+                SAV = new HorizonSave(directory);
+                SAV.Save((uint)DateTime.Now.Ticks);
+                Console.WriteLine($"fixed hashes in {directory}\n");
+            }
+            else
+            {
+                foreach (var subDir in Directory.GetDirectories(directory))
+                    fixhashes(subDir);
+            }
+        }
+
         private static void ProcessFile(in string file, in string directory, in string outDir, in Mode mode)
         {
             if (!Directory.Exists(outDir))
                 Directory.CreateDirectory(outDir);
             var filename = Path.GetFileNameWithoutExtension(file);
-            if (!filename.Contains("Header"))
+            //eception for landname.dat which is never encrypted
+            if (filename.Contains("landname"))
+            {
+                byte[] landname = File.ReadAllBytes(file);
+                File.WriteAllBytes(Path.Combine(outDir, filename + ".dat"), landname);
+                Console.WriteLine($"Copied: {file}\n");
+            }
+            else if (!filename.Contains("Header"))
             {
                 switch (mode)
                 {
@@ -134,26 +176,28 @@ namespace HorizonCrypt.ConsoleApp
                         {
                             var headerPath = Path.Combine(directory, filename + "Header.dat");
                             var headerData = File.ReadAllBytes(headerPath);
-                            var encData = File.ReadAllBytes(file);
+                            byte[] encData = File.ReadAllBytes(file);
 
-                            var decrypted = Encryption.Decrypt(headerData, encData);
-                            File.WriteAllBytes(Path.Combine(outDir, filename + ".dat"), decrypted);
-                            Console.WriteLine($"Decrypted: {file}");
+                            Encryption.Decrypt(headerData, encData);
+                            File.WriteAllBytes(Path.Combine(outDir, filename + ".dat"), encData);
+                            Console.WriteLine($"Decrypted: {file}\n");
                             break;
                         }
 
                     case Mode.Encrypt:
                         {
-                            var decData = File.ReadAllBytes(file);
+                            byte[] decData = File.ReadAllBytes(file);
+                            byte[] Header = decData;
 
-                            // Update hashes
-                            TryUpdateFileHashes(decData);
+                            // First 256 bytes go unused
+                            var importantData = new uint[0x80];
+                            Buffer.BlockCopy(Header, 0x100, importantData, 0, 0x200);
 
                             var seed = (uint)DateTime.Now.Ticks;
-                            var (data, headerData) = Encryption.Encrypt(decData, seed);
+                            var encrypt = Encryption.Encrypt(decData, seed, Header);
 
-                            File.WriteAllBytes(Path.Combine(outDir, filename + ".dat"), data);
-                            File.WriteAllBytes(Path.Combine(outDir, filename + "Header.dat"), headerData);
+                            File.WriteAllBytes(Path.Combine(outDir, filename + ".dat"), encrypt.Data);
+                            File.WriteAllBytes(Path.Combine(outDir, filename + "Header.dat"), encrypt.Header);
                             Console.WriteLine($"Encrypted: {file}\n");
                             break;
                         }
@@ -161,53 +205,14 @@ namespace HorizonCrypt.ConsoleApp
             }
         }
 
-        private static void TryUpdateFileHashes(in byte[] data)
-        {
-            HashInfo? selectedInfo = null;
-            foreach (var info in HashInfo.VersionHashInfoList)
-            {
-                var valid = true;
-                for (var i = 0; i < 4; i++)
-                {
-                    if (info.RevisionMagic[i] != BitConverter.ToUInt32(data, i * 4))
-                    {
-                        valid = false;
-                        break;
-                    }
-                }
-                if (valid)
-                {
-                    selectedInfo = info;
-                    break;
-                }
-            }
-
-            if (selectedInfo != null)
-            {
-                HashSet thisFileSet = selectedInfo[(uint)data.Length];
-                if (thisFileSet != null)
-                {
-                    Console.WriteLine($"{thisFileSet.FileName} rev {selectedInfo.RevisionId} detected!");
-                    foreach (var hashRegion in thisFileSet)
-                    {
-                        UpdateAndPrintHash(data, hashRegion.HashOffset, hashRegion.BeginOffset, hashRegion.Size);
-                    }
-                }
-            }
-        }
-
-        private static void UpdateAndPrintHash(in byte[] data, int hashOffset, int startOffset, uint size)
-        {
-            var currHash = BitConverter.ToUInt32(data, hashOffset);
-            var genHash = Murmur3.UpdateMurmur32(data, hashOffset, startOffset, size);
-            Console.WriteLine($"Updated hash @ 0x{hashOffset:X6} [0x{startOffset:X6} - 0x{(startOffset + size):X6}] from 0x{currHash:X8} to 0x{genHash:X8}");
-        }
 
         private static void PrintUsage()
         {
-            Console.WriteLine("HorizonCrypt by Cuyler");
+            Console.WriteLine("HorizonCrypt by Cuyler, Updated by Poyo");
+            Console.WriteLine("Combining HorizonCrypt and NHSE, ultimate Piss");
             Console.WriteLine("Usage:");
             Console.WriteLine("\tHorizonCrypt [-b] [-c|-d] <input>");
         }
+
     }
 }
