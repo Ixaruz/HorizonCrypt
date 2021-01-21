@@ -1,6 +1,15 @@
 # HorizonCrypt
 Animal Crossing: New Horizons Save Encryptor/Decryptor
 
+## Building
+you will need the latest .Net Framework (NOT Net standard 2.0) NHSE.Core.dll from [NHSE](https://github.com/kwsch/NHSE).
+
+then u add a reference to that .dll in Visual Studio.
+
+then u let it build.
+
+the resulting .exe and .dll can be found in "./bin/Debug/".
+
 ## Usage
 HorizonCrypt \[-b\] \[-c|-d\] \<input\>
 
