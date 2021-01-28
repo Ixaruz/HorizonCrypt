@@ -8,7 +8,7 @@ then u add a reference to that .dll in Visual Studio.
 
 then u let it build.
 
-the resulting .exe and .dll can be found in "./bin/Debug/".
+the resulting .exe and .dll can be found in "./bin/Debug/" or "./bin/Release".
 
 ## Usage
 HorizonCrypt \[-b\] \[-c|-d\] \<input\>
