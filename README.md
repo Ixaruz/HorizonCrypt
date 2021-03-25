@@ -11,8 +11,9 @@ then u let it build.
 the resulting .exe and .dll can be found in "./bin/Debug/" or "./bin/Release".
 
 ## Usage
-HorizonCrypt \[-b\] \[-c|-d\] \<input\>
+(mono) HorizonCrypt \[-b\] \[-c|-d\] \<input\>
 
+** mono can be used to run HorizonCrypt (and other .Net console apps) on Mac and Linux
 ## Examples
 
 #### Decrypt File
